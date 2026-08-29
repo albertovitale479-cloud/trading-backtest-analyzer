@@ -1,0 +1,112 @@
+===========================================================
+  ANALYZER TRADING MANUALE - GUIDA INSTALLAZIONE
+  (Mac e Windows)
+===========================================================
+
+Questo pacchetto NON contiene le librerie Python gia' installate
+(l'ambiente virtuale "venv") apposta, per restare leggero da
+mandare via chat/email. Le librerie (una sola: Flask) vengono
+scaricate automaticamente all'interno della cartella la PRIMA
+volta che lo avvii - non toccano il resto del tuo computer.
+
+Serve avere Python 3 installato sul computer (una sola volta,
+gratis). Se non sai se ce l'hai, prova comunque il PASSO 2:
+se manca, gli script te lo dicono chiaramente.
+
+
+-----------------------------------------------------------
+  PASSO 1 - PYTHON (solo se non lo hai gia')
+-----------------------------------------------------------
+
+Mac:
+  Apri il Terminale e scrivi:  python3 --version
+  Se risponde con un numero (es. Python 3.11.x) sei a posto.
+  Se dice "command not found", scarica Python da:
+     https://www.python.org/downloads/macos/
+  e installalo (Continua, Continua, Installa... come ogni app).
+
+Windows:
+  Scarica Python da:
+     https://www.python.org/downloads/windows/
+  Durante l'installazione, IMPORTANTE: spunta in basso la casella
+  "Add python.exe to PATH" prima di cliccare Installa.
+
+
+-----------------------------------------------------------
+  PASSO 2 - ESTRARRE E AVVIARE
+-----------------------------------------------------------
+
+1. Estrai lo zip "Analyzer Trading Manuale.zip" (tasto destro ->
+   Estrai tutto su Windows, doppio click su Mac).
+
+2. Entra nella cartella estratta.
+
+3. Avvia:
+     Mac:      doppio click su "Avvia Analyzer (Mac).command"
+     Windows:  doppio click su "Avvia Analyzer (Windows).bat"
+
+La primissima volta ci mette qualche secondo in piu': sta
+creando l'ambiente virtuale ("venv") dentro la cartella stessa
+e scaricando Flask al suo interno. Dalle volte successive parte
+quasi subito. Si apre da solo il browser su:
+
+     http://localhost:8078
+
+Per spegnere il server: doppio click su "Ferma Analyzer (Mac)
+.command" oppure "Ferma Analyzer (Windows).bat".
+
+
+-----------------------------------------------------------
+  PROBLEMI FREQUENTI
+-----------------------------------------------------------
+
+* Mac: "Impossibile aprire perche' proviene da uno sviluppatore
+  non identificato"
+
+  Tasto destro (o Ctrl+click) sul file "Avvia Analyzer (Mac)
+  .command" -> Apri -> conferma "Apri" nel popup. Va fatto solo
+  la prima volta, poi il doppio click funziona normalmente.
+  (In alternativa: Impostazioni di Sistema -> Privacy e
+  sicurezza -> scorri in basso -> "Apri comunque".)
+
+* Windows: SmartScreen blocca il file .bat
+
+  Clicca "Ulteriori informazioni" -> "Esegui comunque".
+
+* "python3 non trovato" (Mac) o "python non trovato" (Windows)
+
+  Python non e' installato o non e' nel PATH: rifai il PASSO 1.
+
+* La pagina non si apre / "impossibile raggiungere il sito"
+
+  Aspetta qualche secondo in piu' (la prima volta scarica Flask)
+  e ricontrolla. Se hai gia' un altro programma sulla porta 8078,
+  apri "server.py" con un editor di testo e cambia la riga
+  PORT = int(os.environ.get("ANALYZER_PORT", "8078")) con un
+  altro numero, es. "8090", poi apri http://localhost:8090.
+
+* Voglio ricominciare da zero (cancellare tutti i dati di prova)
+
+  Chiudi il server e cancella il file "data\analyzer.db"
+  (o "data/analyzer.db" su Mac). Al prossimo avvio riparte vuoto.
+
+
+-----------------------------------------------------------
+  COSA C'E' NELLA CARTELLA
+-----------------------------------------------------------
+
+  Avvia Analyzer (Mac).command       avvio su Mac
+  Avvia Analyzer (Windows).bat       avvio su Windows
+  Ferma Analyzer (Mac).command       spegnimento su Mac
+  Ferma Analyzer (Windows).bat       spegnimento su Windows
+  server.py                          il server locale (Python)
+  requirements.txt                   librerie necessarie (solo Flask)
+  public\                            l'interfaccia web
+  data\                              qui verra' creato il tuo database
+                                      (analyzer.db) con i tuoi backtest
+  README.md                          descrizione delle funzioni
+
+  La cartella "venv" (le librerie Python) NON e' inclusa in questo
+  zip: viene creata automaticamente al primo avvio, dentro la
+  cartella stessa. Ogni persona che riceve questo pacchetto avra'
+  il proprio venv e il proprio database, completamente separati.

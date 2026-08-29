@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analyzer — Trading Manuale</title>
+<link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">Analyzer <small>Mac &amp; Windows — trading manuale · v1</small></div>
+  <nav class="tabs">
+    <button data-tab="backtest" class="active">Backtest</button>
+    <button data-tab="analisi">Analisi Dati</button>
+    <button data-tab="mc">Monte Carlo</button>
+    <button data-tab="prop">Prop Simulator</button>
+    <button data-tab="settings">Impostazioni</button>
+  </nav>
+</header>
+
+<div class="runbar">
+  <select id="btSelect"><option value="">— nessun backtest —</option></select>
+  <button class="btn" id="btnNewBacktest">➕ Nuovo Backtest</button>
+  <button class="btn danger hidden" id="btnDeleteBacktest">🗑 Elimina</button>
+  <span id="btInfo" class="pill"></span>
+</div>
+
+<main>
+
+  <!-- ============ TAB: BACKTEST ============ -->
+  <section class="tabpane active" id="tab-backtest">
+    <div id="btEmpty" class="empty-state">
+      Crea un nuovo backtest con "➕ Nuovo Backtest" per iniziare a inserire i trade.
+    </div>
+    <div id="btContent" class="hidden">
+
+      <div class="card">
+        <h3>Inserimento rapido trade <small>Invio per salvare e continuare</small></h3>
+        <form class="entry-form" id="entryForm">
+          <div class="field" style="min-width:170px">
+            <label>Data</label>
+            <div class="date-stepper">
+              <button type="button" class="btn small" id="datePrev">◀</button>
+              <input type="date" id="fDate" required>
+              <button type="button" class="btn small" id="dateNext">▶</button>
+              <button type="button" class="btn small" id="dateToday">oggi</button>
+            </div>
+          </div>
+          <div class="field" style="min-width:150px">
+            <label>Direzione</label>
+            <div class="dir-toggle" id="dirToggle">
+              <button type="button" class="long active" data-dir="long">Long</button>
+              <button type="button" class="short" data-dir="short">Short</button>
+            </div>
+          </div>
+          <div class="field" style="min-width:170px">
+            <label>Fase</label>
+            <div class="dir-toggle" id="sampleToggle">
+              <button type="button" class="long active" data-sample="is">In-Sample</button>
+              <button type="button" class="short" data-sample="oos">Out-of-Sample</button>
+            </div>
+          </div>
+          <div class="field" style="min-width:220px">
+            <label>Schema</label>
+            <div class="chip-row" id="schemaChips"></div>
+          </div>
+          <div class="field hidden" id="instrumentField" style="min-width:150px">
+            <label>Strumento</label>
+            <select id="fInstrument"><option value="">Nessuno</option></select>
+          </div>
+          <div class="field" style="width:110px">
+            <label>Rischio %</label>
+            <input type="number" step="0.01" id="fRiskPct" value="1">
+            <div class="risk-hint" id="riskHint">= $0</div>
+          </div>
+          <div class="field" style="width:110px" id="fRWrap">
+            <label>Risultato (R)</label>
+            <input type="number" step="0.01" id="fR" placeholder="es. 2.5, -1, 0=BE" required>
+            <div class="risk-hint hidden" id="beHint">= Breakeven</div>
+          </div>
+          <div class="field" style="width:120px">
+            <label>P&amp;L $ (auto)</label>
+            <input type="number" step="0.01" id="fPnl">
+          </div>
+          <div class="field" style="min-width:160px; flex:2">
+            <label>Note (opzionale)</label>
+            <input type="text" id="fNotes" placeholder="es. break-even a metà, news...">
+          </div>
+          <div class="field" style="width:auto">
+            <button class="btn primary" type="submit" id="btnSaveTrade">Salva trade</button>
+          </div>
+          <div class="field hidden" style="width:auto" id="cancelEditWrap">
+            <button class="btn" type="button" id="btnCancelEdit">Annulla modifica</button>
+          </div>
+        </form>
+
+        <div class="partials-toggle">
+          <label class="check-label">
+            <input type="checkbox" id="fUsePartials">
+            Questo trade ha preso parziali (TP multipli / breakeven)
+          </label>
+        </div>
+        <div class="partials-box hidden" id="partialsBox">
+          <div class="partials-rows" id="partialsRows"></div>
+          <div class="partials-actions">
+            <button class="btn small" type="button" id="btnAddPartial">+ Aggiungi parziale</button>
+            <div class="partials-summary" id="partialsSummary"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3>Trade del <span id="dayLabel">—</span> <span class="day-total" id="dayTotal"></span></h3>
+          <div class="table-wrap">
+            <table class="data" id="dayTable">
+              <thead><tr><th>Ora ins.</th><th>Dir</th><th>Schema</th><th>Strumento</th><th>Rischio %</th><th>R</th><th>P&amp;L</th><th></th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Riepilogo backtest</h3>
+          <div class="kpi-grid" id="btSummaryGrid"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Tutti i trade <small id="allCount"></small></h3>
+        <div class="table-wrap">
+          <table class="data" id="allTradesTable">
+            <thead><tr>
+              <th data-k="date">Data</th><th data-k="direction">Dir</th><th data-k="sample_type">Fase</th><th data-k="schema">Schema</th>
+              <th data-k="instrument">Strumento</th>
+              <th data-k="risk_percent">Rischio %</th><th data-k="risk_amount">Rischio $</th>
+              <th data-k="r_multiple">R</th>
+              <th data-k="pnl">P&amp;L</th><th>Note</th><th></th><th></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TAB: ANALISI DATI ============ -->
+  <section class="tabpane" id="tab-analisi">
+    <div id="anEmpty" class="empty-state">Seleziona un backtest con dei trade per vedere l'analisi.</div>
+    <div id="anContent" class="hidden">
+      <div class="row" style="align-items:center; margin-bottom:14px">
+        <div class="field" style="width:auto">
+          <label>Vista</label>
+          <div class="dir-toggle" id="analisiFilterToggle" style="min-width:340px">
+            <button type="button" class="active" data-filter="all">Tutti (IS + OOS)</button>
+            <button type="button" class="long" data-filter="is">Solo In-Sample</button>
+            <button type="button" class="short" data-filter="oos">Solo Out-of-Sample</button>
+          </div>
+        </div>
+        <div class="risk-hint" id="analisiFilterHint" style="margin-left:12px"></div>
+      </div>
+      <div class="kpi-grid" id="kpiGrid"></div>
+
+      <div class="chart-grid">
+        <div class="card wide">
+          <h3>Equity curve <small id="equityLegend"></small></h3>
+          <div class="chart-wrap"><canvas class="chart" id="chEquity"></canvas></div>
+        </div>
+        <div class="card wide">
+          <h3>Drawdown</h3>
+          <div class="chart-wrap"><canvas class="chart" id="chDrawdown"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Distribuzione P&amp;L</h3>
+          <div class="chart-wrap"><canvas class="chart" id="chHist"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Per giorno della settimana</h3>
+          <div class="chart-wrap"><canvas class="chart" id="chDow"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Per mese</h3>
+          <div class="chart-wrap"><canvas class="chart" id="chMonth"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Long vs Short</h3>
+          <div class="chart-wrap"><canvas class="chart" id="chLS"></canvas></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Per schema</h3>
+        <div class="table-wrap">
+          <table class="data" id="schemaStatsTable">
+            <thead><tr><th>Schema</th><th>Trade</th><th>Win rate</th><th>Profit factor</th><th>R medio</th><th>Netto</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card hidden" id="instrumentStatsCard">
+        <h3>Per strumento</h3>
+        <div class="table-wrap">
+          <table class="data" id="instrumentStatsTable">
+            <thead><tr><th>Strumento</th><th>Trade</th><th>Win rate</th><th>Profit factor</th><th>R medio</th><th>Netto</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TAB: MONTE CARLO ============ -->
+  <section class="tabpane" id="tab-mc">
+    <div class="card">
+      <h3>Parametri simulazione</h3>
+      <div class="row">
+        <div class="field">
+          <label>Metodo</label>
+          <select id="mcMethod">
+            <option value="reshuffle">Reshuffle (permutazione)</option>
+            <option value="br">Bootstrap con reimmissione (B&amp;R)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Unità di campionamento</label>
+          <select id="mcUnit">
+            <option value="trade">Per trade</option>
+            <option value="day">Per giornata</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Simulazioni</label>
+          <input type="number" id="mcSims" value="2000" min="200" max="20000">
+        </div>
+        <div class="field">
+          <label>Moltiplicatore rischio</label>
+          <input type="number" id="mcMult" value="1" step="0.1">
+        </div>
+        <div class="field" style="width:auto"><button class="btn primary" id="btnMC">Simula</button></div>
+      </div>
+      <h3 style="margin-top:14px">Strategie incluse (portafoglio)</h3>
+      <div class="picker" id="mcPicker"></div>
+    </div>
+    <div id="mcResults"></div>
+  </section>
+
+  <!-- ============ TAB: PROP SIMULATOR ============ -->
+  <section class="tabpane" id="tab-prop">
+
+    <div class="prop-layout">
+      <div class="prop-sidebar">
+        <div class="card">
+          <h3>Regole della prop</h3>
+
+          <div class="field">
+            <label>Categoria</label>
+            <select id="propCategory">
+              <option value="futures">Futures ($ fissi)</option>
+              <option value="cfd">CFD (% sul conto)</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Preset</label>
+            <select id="propPreset"></select>
+          </div>
+          <p class="rules-note">Valori indicativi: verifica sempre le regole ufficiali della tua prop e correggili qui sotto.</p>
+
+          <div class="rules-grid">
+            <div class="field"><label>Conto ($)</label><input type="number" id="pAccount" value="50000"></div>
+            <div class="field"><label id="lblPTarget">Target ($)</label><input type="number" id="pTarget" value="3000"></div>
+
+            <div class="field"><label id="lblPDD">Max Drawdown ($)</label><input type="number" id="pDD" value="2500"></div>
+            <div class="field"><label>Tipo Drawdown</label>
+              <select id="pDDMode">
+                <option value="trailing_intraday">Trailing intraday</option>
+                <option value="trailing_eod">Trailing end-of-day</option>
+                <option value="static">Statico</option>
+              </select>
+            </div>
+
+            <div class="field"><label id="lblPDLL">Daily Loss Limit ($, 0=nessuno)</label><input type="number" id="pDLL" value="0"></div>
+            <div class="field"><label id="lblPDDStop">Il trailing si ferma a BE+ ($, 0=mai)</label><input type="number" id="pDDStop" value="0"></div>
+
+            <div class="field"><label>Giorni minimi di trading</label><input type="number" id="pMinDays" value="1"></div>
+            <div class="field"><label>Giorni massimi (0=illimitati)</label><input type="number" id="pMaxDays" value="0"></div>
+
+            <div class="field"><label>Consistency rule (% max su un giorno, 0=off)</label><input type="number" id="pConsistency" value="0"></div>
+            <div class="field"><label>Costo tentativo ($)</label><input type="number" id="pFee" value="0"></div>
+
+            <div class="field full"><label>Simulazioni</label><input type="number" id="pSims" value="3000"></div>
+          </div>
+
+          <p class="rules-note">Strategie incluse (spunta più righe per fare la prop con più strategie insieme; la casella a destra è il rischio: 1 = come nel backtest, 0.1 = un decimo).</p>
+          <div class="picker" id="propPicker"></div>
+
+          <button class="btn primary sim-btn" id="btnSimulate">Simula probabilità di passaggio</button>
+          <p class="rules-note">Monte Carlo bootstrap sulle giornate del backtest selezionato. Il drawdown intraday è approssimato camminando trade-per-trade sull'equity del giorno.</p>
+        </div>
+      </div>
+
+      <div class="results-col" id="propResults"></div>
+    </div>
+
+    <div class="prop-layout">
+      <div class="prop-sidebar">
+        <div class="card">
+          <h3>Fase 2 — Conto Funded <small>(payout)</small></h3>
+          <p class="rules-note">Dopo aver superato la challenge, quanto è probabile arrivare a un payout con lo stesso conto funded?</p>
+
+          <div class="rules-grid">
+            <div class="field"><label>Giorni finestra payout</label><input type="number" id="fDays" value="30"></div>
+            <div class="field"><label>Giorni minimi di trading</label><input type="number" id="fMinDays" value="4"></div>
+
+            <div class="field"><label>Giorni con profitto richiesti</label><input type="number" id="fProfitDays" value="0"></div>
+            <div class="field"><label>Soglia profitto/giorno ($)</label><input type="number" id="fDayThr" value="0"></div>
+
+            <div class="field"><label id="lblFMaxDD">Max Drawdown EOD ($)</label><input type="number" id="fMaxDD" value="2500"></div>
+            <div class="field"><label>Profit split (%)</label><input type="number" id="fSplit" value="80" step="5"></div>
+
+            <div class="field"><label>Consistency rule (% max su un giorno, 0=off)</label><input type="number" id="fConsistency" value="0"></div>
+            <div class="field"><label>Simulazioni</label><input type="number" id="fSims" value="3000"></div>
+          </div>
+
+          <button class="btn primary sim-btn" id="btnSimulateFunded">Simula probabilità di payout</button>
+          <p class="rules-note">Usa le stesse strategie selezionate sopra (con lo stesso rischio) e lo stesso pool di giornate, incluse quelle senza trade.</p>
+        </div>
+      </div>
+
+      <div class="results-col" id="fundedResults"></div>
+    </div>
+
+  </section>
+
+  <!-- ============ TAB: IMPOSTAZIONI ============ -->
+  <section class="tabpane" id="tab-settings">
+    <div class="card">
+      <h3>Schemi / Setup</h3>
+      <div class="row">
+        <div class="field"><label>Nome schema</label><input type="text" id="newSchemaName" placeholder="es. ORB, VWAP reclaim, Sweep..."></div>
+        <div class="field" style="width:70px"><label>Colore</label><input type="color" id="newSchemaColor" value="#3987e5"></div>
+        <div class="field" style="width:auto"><button class="btn primary" id="btnAddSchema">Aggiungi</button></div>
+      </div>
+      <div class="schema-list" id="schemaList"></div>
+    </div>
+    <div class="card">
+      <h3>Strumenti <small>usati dai backtest in modalità "multi-strumento"</small></h3>
+      <div class="row">
+        <div class="field"><label>Nome strumento</label><input type="text" id="newInstrumentName" placeholder="es. EURUSD, XAUUSD, NQ..."></div>
+        <div class="field" style="width:auto"><button class="btn primary" id="btnAddInstrument">Aggiungi</button></div>
+      </div>
+      <div class="schema-list" id="instrumentList"></div>
+    </div>
+    <div class="card">
+      <h3>Preferenze inserimento</h3>
+      <div class="row">
+        <div class="field"><label>Rischio % di default per nuovo trade</label><input type="number" id="settDefaultRisk" step="0.01" value="1"></div>
+        <div class="field" style="width:auto"><button class="btn primary" id="btnSaveSettings">Salva</button></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="tooltip" id="tooltip"></div>
+<div id="modalRoot"></div>
+
+<script src="app.js?v=7"></script>
+</body>
+</html>

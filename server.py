@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     backtest_id INTEGER NOT NULL REFERENCES backtests(id) ON DELETE CASCADE,
     date TEXT NOT NULL,
+    time TEXT DEFAULT '',
     direction TEXT NOT NULL DEFAULT 'long',
     schema_id INTEGER REFERENCES schemas(id) ON DELETE SET NULL,
     instrument_id INTEGER REFERENCES instruments(id) ON DELETE SET NULL,
@@ -117,6 +118,7 @@ MIGRATIONS = [
     ("trades", "sample_type", "ALTER TABLE trades ADD COLUMN sample_type TEXT NOT NULL DEFAULT 'is'"),
     ("trades", "use_partials", "ALTER TABLE trades ADD COLUMN use_partials INTEGER NOT NULL DEFAULT 0"),
     ("trades", "partials", "ALTER TABLE trades ADD COLUMN partials TEXT NOT NULL DEFAULT '[]'"),
+    ("trades", "time", "ALTER TABLE trades ADD COLUMN time TEXT DEFAULT ''"),
 ]
 
 # Strumenti CFD pre-configurati al primo avvio (valore pip indicativo —
@@ -326,8 +328,19 @@ def _trade_payload(data):
     sample_type = data.get("sample_type") or "is"
     if sample_type not in ("is", "oos"):
         sample_type = "is"
+    time_str = (data.get("time") or "").strip()
+    if time_str:
+        parts = time_str.split(":")
+        try:
+            hh, mm = int(parts[0]), int(parts[1])
+            if not (0 <= hh <= 23 and 0 <= mm <= 59):
+                raise ValueError
+        except (ValueError, IndexError):
+            raise TradeValidationError("Orario non valido (usa HH:MM)")
+        time_str = f"{hh:02d}:{mm:02d}"
     return {
         "date": data.get("date") or datetime.now().strftime("%Y-%m-%d"),
+        "time": time_str,
         "direction": data.get("direction", "long"),
         "schema_id": data.get("schema_id") or None,
         "instrument_id": data.get("instrument_id") or None,
@@ -359,11 +372,11 @@ def create_trade(bid):
     if not bt:
         return jsonify({"error": "backtest non trovato"}), 404
     cur = db.execute(
-        """INSERT INTO trades (backtest_id, date, direction, schema_id, instrument_id,
+        """INSERT INTO trades (backtest_id, date, time, direction, schema_id, instrument_id,
                                 risk_percent, risk_amount, r_multiple, sample_type, pips_sl, pips_tp, lots,
                                 pnl_gross, pnl, commission, use_partials, partials, notes, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (bid, p["date"], p["direction"], p["schema_id"], p["instrument_id"], p["risk_percent"],
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (bid, p["date"], p["time"], p["direction"], p["schema_id"], p["instrument_id"], p["risk_percent"],
          p["risk_amount"], p["r_multiple"], p["sample_type"], p["pips_sl"], p["pips_tp"], p["lots"],
          p["pnl_gross"], p["pnl"], p["commission"], int(p["use_partials"]), json.dumps(p["partials"]),
          p["notes"], now_iso()),
@@ -387,10 +400,10 @@ def update_trade(tid):
     except TradeValidationError as e:
         return jsonify({"error": str(e)}), 400
     db.execute(
-        """UPDATE trades SET date=?, direction=?, schema_id=?, instrument_id=?, risk_percent=?,
+        """UPDATE trades SET date=?, time=?, direction=?, schema_id=?, instrument_id=?, risk_percent=?,
                               risk_amount=?, r_multiple=?, sample_type=?, pips_sl=?, pips_tp=?, lots=?,
                               pnl_gross=?, pnl=?, commission=?, use_partials=?, partials=?, notes=? WHERE id=?""",
-        (p["date"], p["direction"], p["schema_id"], p["instrument_id"], p["risk_percent"],
+        (p["date"], p["time"], p["direction"], p["schema_id"], p["instrument_id"], p["risk_percent"],
          p["risk_amount"], p["r_multiple"], p["sample_type"], p["pips_sl"], p["pips_tp"], p["lots"],
          p["pnl_gross"], p["pnl"], p["commission"], int(p["use_partials"]), json.dumps(p["partials"]),
          p["notes"], tid),

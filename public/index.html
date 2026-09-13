@@ -47,6 +47,10 @@
               <button type="button" class="btn small" id="dateToday">oggi</button>
             </div>
           </div>
+          <div class="field" style="width:110px">
+            <label>Orario</label>
+            <input type="time" id="fTime">
+          </div>
           <div class="field" style="min-width:150px">
             <label>Direzione</label>
             <div class="dir-toggle" id="dirToggle">
@@ -115,7 +119,7 @@
           <h3>Trade del <span id="dayLabel">—</span> <span class="day-total" id="dayTotal"></span></h3>
           <div class="table-wrap">
             <table class="data" id="dayTable">
-              <thead><tr><th>Ora ins.</th><th>Dir</th><th>Schema</th><th>Strumento</th><th>Rischio %</th><th>R</th><th>P&amp;L</th><th></th><th></th></tr></thead>
+              <thead><tr><th>Orario</th><th>Dir</th><th>Schema</th><th>Strumento</th><th>Rischio %</th><th>R</th><th>P&amp;L</th><th></th><th></th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -131,7 +135,7 @@
         <div class="table-wrap">
           <table class="data" id="allTradesTable">
             <thead><tr>
-              <th data-k="date">Data</th><th data-k="direction">Dir</th><th data-k="sample_type">Fase</th><th data-k="schema">Schema</th>
+              <th data-k="date">Data</th><th data-k="time">Orario</th><th data-k="direction">Dir</th><th data-k="sample_type">Fase</th><th data-k="schema">Schema</th>
               <th data-k="instrument">Strumento</th>
               <th data-k="risk_percent">Rischio %</th><th data-k="risk_amount">Rischio $</th>
               <th data-k="r_multiple">R</th>
@@ -148,6 +152,15 @@
   <section class="tabpane" id="tab-analisi">
     <div id="anEmpty" class="empty-state">Seleziona un backtest con dei trade per vedere l'analisi.</div>
     <div id="anContent" class="hidden">
+      <div class="row" style="align-items:center; margin-bottom:6px">
+        <div class="field" style="width:auto">
+          <label>Sezione</label>
+          <div class="dir-toggle" id="analisiSectionToggle" style="min-width:340px">
+            <button type="button" class="active" data-section="overview">Panoramica</button>
+            <button type="button" class="short" data-section="chunk">Chunk Optimization</button>
+          </div>
+        </div>
+      </div>
       <div class="row" style="align-items:center; margin-bottom:14px">
         <div class="field" style="width:auto">
           <label>Vista</label>
@@ -159,6 +172,8 @@
         </div>
         <div class="risk-hint" id="analisiFilterHint" style="margin-left:12px"></div>
       </div>
+
+      <div id="anOverview">
       <div class="kpi-grid" id="kpiGrid"></div>
 
       <div class="chart-grid">
@@ -188,6 +203,24 @@
         </div>
       </div>
 
+      <section class="analysis-outcome-section" aria-labelledby="outcomeTitle">
+        <div class="card" id="chOutcomeCard">
+          <h3 id="outcomeTitle">Esito dei trade <small>ripartizione per P&amp;L realizzato</small></h3>
+          <div class="chart-wrap"><canvas class="chart" id="chOutcome" role="img" aria-label="Ripartizione dei trade in profitto, loss e breakeven"></canvas></div>
+        </div>
+      </section>
+
+      <div class="chart-grid">
+        <div class="card wide" id="chHourCard">
+          <h3>Per orario <small>solo trade con orario impostato</small></h3>
+          <div class="chart-wrap"><canvas class="chart" id="chHour"></canvas></div>
+        </div>
+        <div class="card wide">
+          <h3>Per settimana del mese <small>tutti i mesi aggregati insieme</small></h3>
+          <div class="chart-wrap"><canvas class="chart" id="chWeekOfMonth"></canvas></div>
+        </div>
+      </div>
+
       <div class="card">
         <h3>Per schema</h3>
         <div class="table-wrap">
@@ -205,6 +238,27 @@
             <thead><tr><th>Strumento</th><th>Trade</th><th>Win rate</th><th>Profit factor</th><th>R medio</th><th>Netto</th></tr></thead>
             <tbody></tbody>
           </table>
+        </div>
+      </div>
+      </div>
+
+      <div id="anChunkSection" class="hidden">
+        <div class="card">
+          <h3>Chunk Optimization <small>dividi il backtest in blocchi da N trade per vedere l'andamento nel tempo</small></h3>
+          <div class="row" style="align-items:flex-end; margin-bottom:12px">
+            <div class="field" style="width:160px">
+              <label>Trade per chunk</label>
+              <input type="number" id="chunkSize" min="1" step="1" value="50">
+            </div>
+            <div class="risk-hint" id="chunkHint" style="margin-bottom:10px"></div>
+          </div>
+          <div class="chart-wrap"><canvas class="chart" id="chChunk"></canvas></div>
+          <div class="table-wrap" style="margin-top:12px">
+            <table class="data" id="chunkTable">
+              <thead><tr><th>Chunk</th><th>Periodo</th><th>Trade</th><th>Win rate</th><th>Profit factor</th><th>R medio</th><th>Netto</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

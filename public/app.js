@@ -52,6 +52,11 @@ function addDays(dateStr, n) {
   return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
 }
 function dowOf(dateStr) { return new Date(dateStr + "T00:00:00").getDay(); }
+const MONTH_ABBR = ["Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"];
+function fmtMonthLabel(key) {
+  const [y,m] = key.split("-");
+  return `${MONTH_ABBR[Number(m)-1]} '${y.slice(2)}`;
+}
 function monthKeyOf(dateStr) { return dateStr.slice(0,7); }
 function isBusinessDay(dateStr) { const d = dowOf(dateStr); return d !== 0 && d !== 6; }
 
@@ -139,6 +144,9 @@ const state = {
   propCategory: "futures", // "futures" ($ fissi) o "cfd" (% sul conto)
   usePartials: false,
   partials: [], // [{pct, r}] — usati solo se usePartials è true
+  chunkSize: 50,
+  analisiFilteredTrades: [], // cache dei trade filtrati nella tab Analisi, per la Chunk Optimization
+  analisiSection: "overview", // "overview" | "chunk" — sezione attiva nella tab Analisi Dati
 };
 
 // ---------------------------------------------------------------------
@@ -162,9 +170,15 @@ $$("nav.tabs button").forEach(btn => {
 // ---------------------------------------------------------------------
 function setupCanvas(canvas) {
   const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  const w = Math.max(280, rect.width || canvas.parentElement.clientWidth || 400);
-  const h = canvas.classList.contains("chart") ? 240 : (rect.height || 240);
+  // La larghezza va letta dal contenitore (.chart-wrap), non dal canvas
+  // stesso: il canvas ha uno style.width inline impostato QUI SOTTO, quindi
+  // il suo stesso getBoundingClientRect() rifletterebbe il valore scelto
+  // all'ultimo disegno invece dello spazio realmente disponibile — un
+  // contenitore temporaneamente stretto al primo render (es. durante il
+  // layout iniziale) resterebbe altrimenti "bloccato" per sempre.
+  const parent = canvas.parentElement;
+  const w = Math.max(280, (parent && parent.clientWidth) || canvas.getBoundingClientRect().width || 400);
+  const h = canvas.classList.contains("chart") ? 240 : (canvas.getBoundingClientRect().height || 240);
   canvas.width = w * dpr; canvas.height = h * dpr;
   canvas.style.width = w + "px"; canvas.style.height = h + "px";
   const ctx = canvas.getContext("2d");
@@ -284,6 +298,11 @@ function sampleSplitChart(canvas, points, opts={}) {
 function barChart(canvas, cats, vals, opts={}) {
   const {ctx, w, h} = setupCanvas(canvas);
   if (!cats.length) { emptyMsg(ctx,w,h); return; }
+  // Il colore della barra segue il segno di colorBy[i] se fornito (es. il
+  // valore $ del bucket in un istogramma di conteggi, che è sempre >=0 e
+  // quindi non potrebbe mai indicare da solo "negativo"); altrimenti segue
+  // il segno del valore stesso (comportamento di default: pnl per barra).
+  const colorRef = opts.colorBy || vals;
   const yTicks = niceTicks(Math.min(0,...vals), Math.max(0,...vals), 5);
   const yFn = drawFrame(ctx, w, h, yTicks, v => opts.money ? "$"+Math.round(v).toLocaleString("it-IT") : v.toFixed(0));
   const bw = (w-PAD.l-PAD.r) / cats.length;
@@ -291,14 +310,20 @@ function barChart(canvas, cats, vals, opts={}) {
   vals.forEach((v,i) => {
     const x = PAD.l + i*bw + bw*0.15;
     const y = yFn(v);
-    ctx.fillStyle = v>=0 ? cvar("--good") : cvar("--critical");
+    ctx.fillStyle = colorRef[i]>=0 ? cvar("--good") : cvar("--critical");
     ctx.fillRect(x, Math.min(y,zero), bw*0.7, Math.abs(zero-y));
   });
   ctx.fillStyle = cvar("--muted"); ctx.font = "10px system-ui"; ctx.textAlign = "center";
-  cats.forEach((c,i) => ctx.fillText(String(c), PAD.l + i*bw + bw/2, h-6));
+  // Con molte barre le etichette si sovrappongono: ne salta quante bastano
+  // a lasciare respiro, mostrando sempre la prima e l'ultima.
+  const widest = cats.reduce((a,c) => Math.max(a, ctx.measureText(String(c)).width), 0);
+  const stride = Math.max(1, Math.ceil((widest+10) / bw));
+  cats.forEach((c,i) => {
+    if (i % stride === 0 || i === cats.length-1) ctx.fillText(String(c), PAD.l + i*bw + bw/2, h-6);
+  });
   bindHoverBars(canvas, cats, vals, PAD.l, bw, opts.tip || ((c,v)=>c+": "+fmtMoney(v)));
 }
-function donutChart(canvas, segs) {
+function donutChart(canvas, segs, opts={}) {
   const {ctx, w, h} = setupCanvas(canvas);
   const total = segs.reduce((a,s)=>a+s.value,0);
   if (!total) { emptyMsg(ctx,w,h); return; }
@@ -313,6 +338,15 @@ function donutChart(canvas, segs) {
   ctx.globalCompositeOperation = "destination-out";
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
   ctx.globalCompositeOperation = "source-over";
+  if (opts.centerLabel) {
+    ctx.fillStyle = cvar("--ink"); ctx.font = "600 18px system-ui";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(opts.centerLabel, cx, cy-7);
+    if (opts.centerDetail) {
+      ctx.fillStyle = cvar("--muted"); ctx.font = "11px system-ui";
+      ctx.fillText(opts.centerDetail, cx, cy+12);
+    }
+  }
   let ly = cy - segs.length*9;
   ctx.font = "12px system-ui"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
   segs.forEach(s => {
@@ -704,7 +738,7 @@ $("#entryForm").addEventListener("submit", async e => {
   }
   const pnl = state.usePartials ? riskAmt*r : ($("#fPnl").value !== "" ? Number($("#fPnl").value) : riskAmt*r);
   const payload = {
-    date: state.selectedDate, direction: state.dir, schema_id: state.schemaSel,
+    date: state.selectedDate, time: $("#fTime").value, direction: state.dir, schema_id: state.schemaSel,
     instrument_id: state.current.instrument_mode==="multi" ? state.instrumentSel : null,
     risk_percent: riskPct, risk_amount: riskAmt, r_multiple: r, sample_type: state.sampleType, pnl,
     use_partials: state.usePartials, partials: partialsPayload,
@@ -716,7 +750,7 @@ $("#entryForm").addEventListener("submit", async e => {
       exitEditMode();
     } else {
       await apiPost(`/api/backtests/${state.currentId}/trades`, payload);
-      $("#fR").value = ""; $("#fPnl").value = ""; $("#fNotes").value = "";
+      $("#fR").value = ""; $("#fPnl").value = ""; $("#fNotes").value = ""; $("#fTime").value = "";
       $("#beHint").classList.add("hidden");
       $("#fUsePartials").checked = false;
       togglePartialsUI(false);
@@ -733,6 +767,7 @@ $("#entryForm").addEventListener("submit", async e => {
 function loadTradeIntoForm(t) {
   state.editingId = t.id;
   state.selectedDate = t.date; $("#fDate").value = t.date; updateDayLabel();
+  $("#fTime").value = t.time || "";
   state.dir = t.direction;
   $$("#dirToggle button").forEach(b => b.classList.toggle("active", b.dataset.dir===t.direction));
   state.sampleType = t.sample_type || "is";
@@ -756,7 +791,7 @@ function exitEditMode() {
   state.editingId = null;
   $("#btnSaveTrade").textContent = "Salva trade";
   $("#cancelEditWrap").classList.add("hidden");
-  $("#fR").value = ""; $("#fPnl").value = ""; $("#fNotes").value = "";
+  $("#fR").value = ""; $("#fPnl").value = ""; $("#fNotes").value = ""; $("#fTime").value = "";
   state.partials = [];
   $("#fUsePartials").checked = false;
   togglePartialsUI(false);
@@ -775,14 +810,15 @@ async function refreshBacktestRow() {
 function schemaName(id) { const s = state.schemas.find(x=>x.id===id); return s ? s.name : "—"; }
 
 function renderDayTable() {
-  const rows = state.trades.filter(t=>t.date===state.selectedDate);
+  const rows = state.trades.filter(t=>t.date===state.selectedDate)
+    .slice().sort((a,b) => (a.time||"99:99").localeCompare(b.time||"99:99"));
   const tbody = $("#dayTable tbody");
   tbody.innerHTML = "";
   let total = 0;
   rows.forEach(t => {
     total += t.pnl;
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${new Date(t.created_at).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})}</td>
+    tr.innerHTML = `<td>${escapeHtml(t.time || "—")}</td>
       <td>${t.direction==="long"?"Long":"Short"}</td><td>${escapeHtml(schemaName(t.schema_id))}</td>
       <td>${escapeHtml(instrumentName(t.instrument_id))}</td>
       <td>${fmtPct(t.risk_percent)}</td><td>${fmtR(t.r_multiple)}${partialsBadge(t)}</td>
@@ -822,7 +858,7 @@ function renderAllTradesTable() {
   tbody.innerHTML = "";
   rows.forEach(t => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${t.date}</td><td>${t.direction==="long"?"Long":"Short"}</td>
+    tr.innerHTML = `<td>${t.date}</td><td>${escapeHtml(t.time || "—")}</td><td>${t.direction==="long"?"Long":"Short"}</td>
       <td>${fmtSample(t.sample_type)}</td>
       <td>${escapeHtml(schemaName(t.schema_id))}</td>
       <td>${escapeHtml(instrumentName(t.instrument_id))}</td>
@@ -877,22 +913,27 @@ function computeStats(trades) {
   const list = trades.slice().sort((a,b) => a.date.localeCompare(b.date) || a.id-b.id);
   const n = list.length;
   const empty = {n:0, netProfit:0, gp:0, gl:0, pf:0, winRate:0, avgTrade:0, avgWin:0, avgLoss:0,
-    payoff:0, maxDD:0, maxW:0, maxL:0, daily:{}, dow:{}, month:{}, tradingDays:0, avgDay:0,
-    sharpe:0, sortino:0, top5Share:0, long:{n:0,pnl:0,winRate:0,pf:0}, short:{n:0,pnl:0,winRate:0,pf:0},
-    bySchema:{}, byInstrument:{}, equitySeries:[], ddSeries:[], beCount:0};
+    payoff:0, maxDD:0, maxW:0, maxL:0, daily:{}, dow:{}, month:{}, hour:{}, weekOfMonth:{}, tradingDays:0, avgDay:0,
+    sharpe:0, sortino:0, top5Share:0, avgR:0, long:{n:0,pnl:0,winRate:0,pf:0}, short:{n:0,pnl:0,winRate:0,pf:0},
+    bySchema:{}, byInstrument:{}, equitySeries:[], ddSeries:[], beCount:0, outcomes:{profit:0, loss:0, be:0}};
   if (!n) return empty;
 
   let eq=0, peak=0, maxDD=0, gp=0, gl=0, wins=0, losses=0, curW=0, curL=0, maxW=0, maxL=0;
-  let beCount=0;
-  const daily={}, dow={}, month={}, equitySeries=[], ddSeries=[];
+  let beCount=0, rSumAll=0;
+  const outcomes = {profit:0, loss:0, be:0};
+  const daily={}, dow={}, month={}, hour={}, weekOfMonth={}, equitySeries=[], ddSeries=[];
   const bySchema = {}, byInstrument = {};
   list.forEach(t => {
     eq += t.pnl;
+    rSumAll += (t.r_multiple||0);
     if ((t.r_multiple||0) === 0) beCount++;
     peak = Math.max(peak, eq);
     maxDD = Math.min(maxDD, eq-peak);
     if (t.pnl>0) { gp+=t.pnl; wins++; curW++; curL=0; maxW=Math.max(maxW,curW); }
     else if (t.pnl<0) { gl+=t.pnl; losses++; curL++; curW=0; maxL=Math.max(maxL,curL); }
+    if (t.pnl > 0) outcomes.profit++;
+    else if (t.pnl < 0) outcomes.loss++;
+    else outcomes.be++;
     equitySeries.push({label:t.date, y:eq, sampleType:t.sample_type||"is"});
     ddSeries.push({label:t.date, y:eq-peak, sampleType:t.sample_type||"is"});
     (daily[t.date] ??= {pnl:0,n:0,wins:0}); daily[t.date].pnl+=t.pnl; daily[t.date].n++; if(t.pnl>0) daily[t.date].wins++;
@@ -900,6 +941,16 @@ function computeStats(trades) {
     (dow[dw] ??= {pnl:0,n:0,wins:0}); dow[dw].pnl+=t.pnl; dow[dw].n++; if(t.pnl>0) dow[dw].wins++;
     const mk = monthKeyOf(t.date);
     (month[mk] ??= {pnl:0,n:0,wins:0}); month[mk].pnl+=t.pnl; month[mk].n++; if(t.pnl>0) month[mk].wins++;
+    // Settimana del mese (1-4, aggregata su tutti i mesi): giorno 1-7 -> 1,
+    // 8-14 -> 2, 15-21 -> 3, 22-fine mese -> 4.
+    const wk = Math.min(4, Math.ceil(Number(t.date.slice(8,10)) / 7));
+    (weekOfMonth[wk] ??= {pnl:0,n:0,wins:0}); weekOfMonth[wk].pnl+=t.pnl; weekOfMonth[wk].n++; if(t.pnl>0) weekOfMonth[wk].wins++;
+    if (t.time) {
+      const hk = Number(t.time.split(":")[0]);
+      if (!isNaN(hk)) {
+        (hour[hk] ??= {pnl:0,n:0,wins:0}); hour[hk].pnl+=t.pnl; hour[hk].n++; if(t.pnl>0) hour[hk].wins++;
+      }
+    }
     const sk = t.schema_id ?? "none";
     (bySchema[sk] ??= {n:0,pnl:0,wins:0,gp:0,gl:0,rSum:0});
     const bs = bySchema[sk];
@@ -951,9 +1002,9 @@ function computeStats(trades) {
     n, netProfit: eq, gp, gl, pf: gl<0 ? gp/-gl : (gp>0?Infinity:0),
     winRate: 100*wins/n, avgTrade: eq/n, avgWin: wins?gp/wins:0, avgLoss: losses?gl/losses:0,
     payoff: (losses && gl<0) ? (gp/wins)/(-gl/losses) : 0,
-    maxDD, maxW, maxL, daily, dow, month, tradingDays: dayKeys.length, avgDay, sharpe, sortino,
-    top5Share, long: dirStats("long"), short: dirStats("short"), bySchema, byInstrument, equitySeries, ddSeries,
-    beCount,
+    maxDD, maxW, maxL, daily, dow, month, hour, weekOfMonth, tradingDays: dayKeys.length, avgDay, sharpe, sortino,
+    top5Share, avgR: rSumAll/n, long: dirStats("long"), short: dirStats("short"), bySchema, byInstrument, equitySeries, ddSeries,
+    beCount, outcomes,
   };
 }
 
@@ -968,6 +1019,13 @@ function renderAnalisi() {
 
   const filter = state.analisiFilter;
   const filteredTrades = filter==="all" ? state.trades : state.trades.filter(t => (t.sample_type||"is")===filter);
+  state.analisiFilteredTrades = filteredTrades;
+
+  const isChunk = state.analisiSection === "chunk";
+  $("#anOverview").classList.toggle("hidden", isChunk);
+  $("#anChunkSection").classList.toggle("hidden", !isChunk);
+  if (isChunk) { renderChunkSection(); return; }
+
   const hasOOS = state.trades.some(t => t.sample_type==="oos");
   $("#analisiFilterHint").textContent = hasOOS
     ? (filter==="all" ? "Curva unica: blu = In-Sample, arancio = Out-of-Sample, dalla linea in poi." : "")
@@ -981,7 +1039,7 @@ function renderAnalisi() {
     ["Win rate", fmtPct(s.winRate), s.winRate>=50],
     ["Trade totali", s.n, true],
     ["Avg trade", fmtMoney(s.avgTrade,{plus:true}), s.avgTrade>=0],
-    ["Avg win / loss", `${fmtMoney(s.avgWin)} / ${fmtMoney(s.avgLoss)}`, true],
+    ["Avg win / loss", `<span class="pnl-pos">${fmtMoney(s.avgWin)}</span> / <span class="pnl-neg">${fmtMoney(s.avgLoss)}</span>`, null],
     ["Payoff ratio", fmtNum(s.payoff), s.payoff>=1],
     ["Max drawdown", fmtMoney(s.maxDD), false],
     ["Max win/loss streak", `${s.maxW} / ${s.maxL}`, true],
@@ -992,11 +1050,12 @@ function renderAnalisi() {
     ["Top 5% share profitto", fmtPct(s.top5Share), true],
   ];
   if (s.beCount > 0) {
-    kpis.push(["Trade in Breakeven", s.beCount, true]);
+    kpis.push(["Trade in Breakeven", s.beCount, "be"]);
   }
-  kpis.forEach(([label,val,pos]) => {
+  kpis.forEach(([label,val,status]) => {
     const div = document.createElement("div"); div.className="kpi";
-    div.innerHTML = `<div class="label">${label}</div><div class="value ${pos?'pos':'neg'}">${val}</div>`;
+    const valueClass = status === "be" ? "be" : (status ? "pos" : (status === null ? "" : "neg"));
+    div.innerHTML = `<div class="label">${label}</div><div class="value ${valueClass}">${val}</div>`;
     grid.appendChild(div);
   });
 
@@ -1017,7 +1076,7 @@ function renderAnalisi() {
     const counts = new Array(buckets).fill(0);
     pnls.forEach(v => { let i = Math.floor((v-min)/w); if (i>=buckets) i=buckets-1; if(i<0)i=0; counts[i]++; });
     const cats = counts.map((_,i) => Math.round(min+i*w));
-    barChart($("#chHist"), cats, counts, {tip:(c,v)=>`~$${c}: ${v} trade`});
+    barChart($("#chHist"), cats, counts, {colorBy: cats, tip:(c,v)=>`~$${c}: ${v} trade`});
   } else barChart($("#chHist"), [], []);
 
   const dowNames = ["Dom","Lun","Mar","Mer","Gio","Ven","Sab"];
@@ -1025,14 +1084,41 @@ function renderAnalisi() {
   const dowVals = [1,2,3,4,5].filter(d=>s.dow[d]).map(d=>s.dow[d].pnl);
   barChart($("#chDow"), dowCats, dowVals, {money:true});
 
-  const monthCats = Object.keys(s.month).sort();
-  const monthVals = monthCats.map(k=>s.month[k].pnl);
+  const monthKeys = Object.keys(s.month).sort();
+  const monthCats = monthKeys.map(fmtMonthLabel);
+  const monthVals = monthKeys.map(k=>s.month[k].pnl);
   barChart($("#chMonth"), monthCats, monthVals, {money:true});
+
+  const hourKeys = Object.keys(s.hour).map(Number).sort((a,b)=>a-b);
+  const hourCats = hourKeys.map(h=>String(h).padStart(2,"0")+":00");
+  const hourVals = hourKeys.map(h=>s.hour[h].pnl);
+  barChart($("#chHour"), hourCats, hourVals, {money:true, tip:(c,v) => {
+    const h = hourKeys[hourCats.indexOf(c)];
+    const hs = s.hour[h];
+    return `${c} — ${fmtMoney(v,{plus:true})} (${hs.n} trade, WR ${fmtPct(100*hs.wins/hs.n)})`;
+  }});
+
+  const womCats = [1,2,3,4].map(w=>`Sett. ${w}`);
+  const womVals = [1,2,3,4].map(w => s.weekOfMonth[w] ? s.weekOfMonth[w].pnl : 0);
+  barChart($("#chWeekOfMonth"), womCats, womVals, {money:true, tip:(c,v) => {
+    const w = [1,2,3,4][womCats.indexOf(c)];
+    const ws = s.weekOfMonth[w];
+    if (!ws) return `${c}: nessun trade`;
+    return `${c} — ${fmtMoney(v,{plus:true})} (${ws.n} trade, WR ${fmtPct(100*ws.wins/ws.n)})`;
+  }});
 
   donutChart($("#chLS"), [
     {label:`Long (${s.long.n})`, value: Math.max(0,s.long.n), color: cvar("--s1")},
     {label:`Short (${s.short.n})`, value: Math.max(0,s.short.n), color: cvar("--s2")},
   ]);
+
+  const outcomeTotal = s.outcomes.profit + s.outcomes.loss + s.outcomes.be;
+  $("#chOutcome").setAttribute("aria-label", `Esito di ${outcomeTotal} trade: ${s.outcomes.profit} in profitto, ${s.outcomes.loss} in loss, ${s.outcomes.be} in breakeven`);
+  donutChart($("#chOutcome"), [
+    {label:"Profitto", value:s.outcomes.profit, color:cvar("--good")},
+    {label:"Loss", value:s.outcomes.loss, color:cvar("--critical")},
+    {label:"Breakeven", value:s.outcomes.be, color:cvar("--warning")},
+  ], {centerLabel:String(outcomeTotal), centerDetail:"trade"});
 
   const tbody = $("#schemaStatsTable tbody"); tbody.innerHTML = "";
   Object.entries(s.bySchema).forEach(([sid, bs]) => {
@@ -1056,6 +1142,50 @@ function renderAnalisi() {
     });
   }
 }
+
+// ---------------------------------------------------------------------
+// Chunk Optimization: divide i trade (in ordine cronologico) in blocchi
+// da N trade ciascuno e mostra le statistiche di ogni blocco, per vedere
+// se la performance è consistente o degrada nel tempo.
+// ---------------------------------------------------------------------
+function renderChunkSection() {
+  const trades = state.analisiFilteredTrades || [];
+  const list = trades.slice().sort((a,b) => a.date.localeCompare(b.date) || a.id-b.id);
+  const tbody = $("#chunkTable tbody"); tbody.innerHTML = "";
+  if (!list.length) {
+    $("#chunkHint").textContent = "";
+    barChart($("#chChunk"), [], []);
+    return;
+  }
+  const size = Math.max(1, Math.floor(Number($("#chunkSize").value) || 1));
+  const chunks = [];
+  for (let i=0; i<list.length; i+=size) chunks.push(list.slice(i, i+size));
+  $("#chunkHint").textContent = `${chunks.length} chunk` +
+    (chunks[chunks.length-1].length !== size ? ` (l'ultimo ha ${chunks[chunks.length-1].length} trade)` : "");
+
+  const cats = [], vals = [];
+  chunks.forEach((slice, idx) => {
+    const cs = computeStats(slice);
+    cats.push(`#${idx+1}`);
+    vals.push(cs.netProfit);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>#${idx+1}</td><td>${slice[0].date} → ${slice[slice.length-1].date}</td>
+      <td>${slice.length}</td><td>${fmtPct(cs.winRate)}</td>
+      <td>${cs.pf===Infinity?"∞":fmtNum(cs.pf)}</td><td>${fmtNum(cs.avgR)}R</td>
+      <td class="${cs.netProfit>=0?'pnl-pos':'pnl-neg'}">${fmtMoney(cs.netProfit,{plus:true})}</td>`;
+    tbody.appendChild(tr);
+  });
+  barChart($("#chChunk"), cats, vals, {money:true, tip:(c,v)=>`Chunk ${c}: ${fmtMoney(v,{plus:true})}`});
+}
+$("#chunkSize").addEventListener("input", renderChunkSection);
+
+$$("#analisiSectionToggle button").forEach(b => b.addEventListener("click", () => {
+  state.analisiSection = b.dataset.section;
+  $$("#analisiSectionToggle button").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active");
+  renderAnalisi();
+}));
+
 $$("#analisiFilterToggle button").forEach(b => b.addEventListener("click", () => {
   state.analisiFilter = b.dataset.filter;
   $$("#analisiFilterToggle button").forEach(x=>x.classList.remove("active"));
@@ -1654,8 +1784,9 @@ function histogramFromValues(canvas, values, buckets=14, opts={}) {
   const bw = (max-min)/buckets || 1;
   const counts = new Array(buckets).fill(0);
   values.forEach(v => { let i = Math.floor((v-min)/bw); if (i>=buckets) i=buckets-1; if(i<0) i=0; counts[i]++; });
+  const bucketVals = counts.map((_,i) => min+i*bw);
   const cats = counts.map((_,i) => opts.intCats ? Math.round(min+i*bw) : "$"+Math.round(min+i*bw).toLocaleString("it-IT"));
-  barChart(canvas, cats, counts, {tip:(c,v)=>`${c}: ${v} simulazioni`});
+  barChart(canvas, cats, counts, {colorBy: bucketVals, tip:(c,v)=>`${c}: ${v} simulazioni`});
 }
 
 // -------------------- render risultati: Regole della prop --------------------

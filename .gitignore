@@ -1,21 +1,27 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
+# Dati personali e database locali
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+*.db-*
+*.sqlite-*
+*.sqlite3-*
+
+# Ambiente Python e file temporanei locali
 venv/
 env/
 .venv/
-
-# Dati locali (contengono i backtest dell'utente)
-data/*.db
-data/*.sqlite3
-
-# macOS
+__pycache__/
+*.py[cod]
+*.egg-info/
+.server.pid
 .DS_Store
 
-# Editor
+# Impostazioni dell'editor e log locali
 .vscode/
 .idea/
-
-# Log
 *.log
+
+# Archivi di distribuzione generati localmente
+*.zip
